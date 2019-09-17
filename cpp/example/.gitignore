@@ -1,0 +1,6 @@
+Makefile
+*.moc
+moc_*
+.qmake.stash
+test
+test.pro.user
