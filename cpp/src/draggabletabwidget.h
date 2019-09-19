@@ -36,6 +36,6 @@ class DraggableTabWidget : public QTabWidget {
   ~DraggableTabWidget();
 
  public slots:
-  QWidget* createNewWindow(const QRect& win_rect,
-                           const TabInfo& tab_info);
+  virtual QWidget* createNewWindow(const QRect& win_rect,
+                                   const TabInfo& tab_info);
 };
