@@ -154,16 +154,21 @@ bool DraggableTabBar::dispatchEvent(QEvent* event) {
   QList<QEvent::Type> dispatch_types;
   dispatch_types << QEvent::MouseMove << QEvent::MouseButtonRelease;
   
-  if (!dispatch_types.contains(event->type()))
-    return false;
-  if (event->type() == QEvent::MouseMove && dragging_)
-    return false;
-  if (event->type() == QEvent::MouseButtonRelease && click_point_.isNull())
-    return false;
-
   auto mouse_event = static_cast<QMouseEvent*>(event);
   auto global_pos = mouse_event->globalPos();
   auto pos = mapFromGlobal(global_pos);
+
+  if (!dispatch_types.contains(event->type()))
+    return false;
+  if (event->type() == QEvent::MouseMove) {
+    if (dragging_)
+      return false;
+    if (!geometry().contains(pos))
+      return false;
+  }
+  if (event->type() == QEvent::MouseButtonRelease && click_point_.isNull())
+    return false;
+
   QMouseEvent new_event(
       mouse_event->type(), pos, global_pos,
       mouse_event->button(), mouse_event->buttons(), mouse_event->modifiers());
