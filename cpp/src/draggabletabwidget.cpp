@@ -22,15 +22,12 @@ class DraggableTabBar : public QTabBar {
   Q_OBJECT
  public:
   DraggableTabBar(QWidget* parent = nullptr);
-  ~DraggableTabBar() = default;
+  ~DraggableTabBar();
 
  protected:
   void mousePressEvent(QMouseEvent* event) override;
   void mouseReleaseEvent(QMouseEvent* event) override;
   void mouseMoveEvent(QMouseEvent* event) override;
-  void dragEnterEvent(QDragEnterEvent* event) override;
-  void dropEvent(QDropEvent* event) override;
-  bool eventFilter(QObject* watched, QEvent* event) override;
 
  signals:
   void createWindowRequested(const QRect& win_rect,
@@ -38,174 +35,159 @@ class DraggableTabBar : public QTabBar {
 
  private:
   void startDrag();
-  bool dispatchEvent(QEvent* event);
-  void sendButtonRelease(QObject* target = nullptr);
+  QMouseEvent* createMouseEvent(
+      QEvent::Type type, const QPoint& pos = QPoint());
   void startTabMove();
-  DraggableTabWidget* parentWidget_() const;
-  
-  QPoint click_point_;
+  DraggableTabWidget* parentTabWidget() const;
+  void destroyUnnecessaryWindow();
 
+  QPoint click_point_ = QPoint();
+  bool can_start_drag_ = false;
+
+  static bool initializing_drag_;
   static TabInfo drag_tab_info_;
-  static bool dragging_;
+  static QWidget* dragging_widget_;
+  static QList<DraggableTabBar*> tab_bar_instances_;
+  static Qt::WindowFlags org_window_flags_;
 };
 
+bool DraggableTabBar::initializing_drag_ = false;
 TabInfo DraggableTabBar::drag_tab_info_;
-bool DraggableTabBar::dragging_ = false;
+QWidget* DraggableTabBar::dragging_widget_ = nullptr;
+QList<DraggableTabBar*> DraggableTabBar::tab_bar_instances_;
+Qt::WindowFlags DraggableTabBar::org_window_flags_;
 
 DraggableTabBar::DraggableTabBar(QWidget* parent)
     : QTabBar(parent) {
+  tab_bar_instances_ << this;
   setAcceptDrops(true);
-  qApp->installEventFilter(this);
+}
+
+DraggableTabBar::~DraggableTabBar() {
+  tab_bar_instances_.removeOne(this);
 }
 
 void DraggableTabBar::mousePressEvent(QMouseEvent* event) {
   if (event->button() == Qt::LeftButton) {
     auto current_index = tabAt(event->pos());
-    auto parent = parentWidget_();
+    auto parent = parentTabWidget();
     parent->setCurrentIndex(current_index);
     drag_tab_info_ = TabInfo(
         parent->currentWidget(), tabText(current_index), tabIcon(current_index),
         tabToolTip(current_index), tabWhatsThis(current_index));
-    dragging_ = false;
-    click_point_ = event->globalPos() - window()->pos();
+    dragging_widget_ = nullptr;
+    org_window_flags_ = drag_tab_info_.widget()->windowFlags();
+    click_point_ = event->pos();
+    can_start_drag_ = false;
+    grabMouse();
   }
   QTabBar::mousePressEvent(event);
 }
 
 void DraggableTabBar::mouseReleaseEvent(QMouseEvent* event) {
+  if (event->button() == Qt::LeftButton) {
+    if (initializing_drag_) {
+      dragging_widget_ = drag_tab_info_.widget();
+      dragging_widget_->setParent(nullptr);
+      dragging_widget_->setWindowFlags(Qt::FramelessWindowHint);
+      initializing_drag_ = false;
+    } else {
+      if (dragging_widget_) {
+        dragging_widget_->setWindowFlags(org_window_flags_);
+        auto win_rect = dragging_widget_->geometry();
+        win_rect.moveTo(event->globalPos());
+        emit createWindowRequested(win_rect, drag_tab_info_);
+        destroyUnnecessaryWindow();
+      }
+      dragging_widget_ = nullptr;
+      drag_tab_info_ = TabInfo();
+      releaseMouse();
+    }
+  }
   click_point_ = QPoint();
-  dragging_ = false;
+  can_start_drag_ = false;
   QTabBar::mouseReleaseEvent(event);
 }
 
 void DraggableTabBar::mouseMoveEvent(QMouseEvent* event) {
-  if (click_point_.isNull())
+  if (!drag_tab_info_.widget())
     return;
 
-  if (geometry().contains(event->pos())) {
+  if (!can_start_drag_) {
+    auto moved_length = (event->pos() - click_point_).manhattanLength();
+    can_start_drag_ = moved_length > qApp->startDragDistance();
+  }
+  if (dragging_widget_) {
+    for (auto& bar_inst : tab_bar_instances_) {
+      auto bar_region  = bar_inst->visibleRegion();
+      bar_region.translate(bar_inst->mapToGlobal(QPoint(0, 0)));
+      if (bar_region.contains(event->globalPos())
+          && qApp->widgetAt(event->globalPos()) == bar_inst) {
+        if (bar_inst == this) {
+          startTabMove();
+          event->accept();
+          return;
+        } else {
+          releaseMouse();
+          bar_inst->grabMouse();
+          event->accept();
+          return;
+        }
+      }
+    }
+  }
+  auto widget_rect = geometry();
+  widget_rect.moveTo(0, 0);
+  if (widget_rect.contains(event->pos())) {
     QTabBar::mouseMoveEvent(event);
-  } else if (!dragging_) {
+  } else if (!dragging_widget_ && can_start_drag_) {
     // start dragging
     startDrag();
     event->accept();
-  } else {
-    QTabBar::mouseMoveEvent(event);
-  }
-}
-  
-void DraggableTabBar::dragEnterEvent(QDragEnterEvent* event) {
-  // When mouse cursor is back to source widget, cancel drag
-  if (geometry().contains(event->pos())
-      && event->source() == this) {
-    QDrag::cancel();
-    event->accept();
     return;
   }
-  event->acceptProposedAction();
-  sendButtonRelease(event->source());
-}
 
-void DraggableTabBar::dropEvent(QDropEvent* event) {
-  event->acceptProposedAction();
-  startTabMove();
-}
-
-bool DraggableTabBar::eventFilter(QObject* watched, QEvent* event) {
-  if (watched == static_cast<QObject*>(window()->windowHandle()))
-    return dispatchEvent(event);
-  return false;
+  if (dragging_widget_) {
+    dragging_widget_->move(event->globalPos() + QPoint(1, 1));
+    dragging_widget_->show();
+  }
 }
 
 void DraggableTabBar::startDrag() {
-  dragging_ = true;
-  auto parent = parentWidget_();
+  auto parent = parentTabWidget();
   auto idx = parent->indexOf(drag_tab_info_.widget());
   parent->removeTab(idx);
+  drag_tab_info_.widget()->setParent(nullptr);
+  dragging_widget_ = nullptr;
   if (count() == 0)
     window()->hide();
-  auto drag = new QDrag(this);
-  auto data = new QMimeData;
-  drag->setMimeData(data);
-  drag->setPixmap(drag_tab_info_.widget()->grab());
-  auto drop_action = drag->exec(Qt::MoveAction);
-  if (drop_action == Qt::IgnoreAction) {
-    if (drag->target() == this) {
-      // Back to normal move event
-      sendButtonRelease();
-      startTabMove();
-      dragging_ = false;
-    } else {
-      // Drop out. Create new window and complete mouse move
-      auto global_pos = QCursor::pos();
-      auto win_rect = parentWidget()->geometry();
-      win_rect.moveTo(global_pos);
-      emit createWindowRequested(win_rect, drag_tab_info_);
-      dragging_ = false;
-      sendButtonRelease();
-    }
-  }
-  if (count() == 0)
-    window()->deleteLater();
-  drag->deleteLater();
-  data->deleteLater();
+  initializing_drag_ = true;
+  auto release_event = createMouseEvent(
+      QEvent::MouseButtonRelease, mapFromGlobal(QCursor::pos()));
+  QApplication::postEvent(this, release_event);
 }
 
-bool DraggableTabBar::dispatchEvent(QEvent* event) {
-  QList<QEvent::Type> dispatch_types;
-  dispatch_types << QEvent::MouseMove << QEvent::MouseButtonRelease;
-  
-  auto mouse_event = static_cast<QMouseEvent*>(event);
-  auto global_pos = mouse_event->globalPos();
-  auto pos = mapFromGlobal(global_pos);
-
-  if (!dispatch_types.contains(event->type()))
-    return false;
-  if (event->type() == QEvent::MouseMove) {
-    if (dragging_)
-      return false;
-    if (!geometry().contains(pos))
-      return false;
-  }
-  if (event->type() == QEvent::MouseButtonRelease && click_point_.isNull())
-    return false;
-
-  QMouseEvent new_event(
-      mouse_event->type(), pos, global_pos,
-      mouse_event->button(), mouse_event->buttons(), mouse_event->modifiers());
-
-  switch (mouse_event->type()) {
-    case QEvent::MouseMove:
-      mouseMoveEvent(&new_event);
-      break;
-    case QEvent::MouseButtonRelease:
-      mouseReleaseEvent(&new_event);
-      break;
-    default:
-      break;
-  }
-  return true;
-}
-
-void DraggableTabBar::sendButtonRelease(QObject* target) {
-  auto global_pos = QCursor::pos();
-  auto pos = mapFromGlobal(global_pos);
+QMouseEvent* DraggableTabBar::createMouseEvent(
+    QEvent::Type type, const QPoint& pos) {
+  QPoint global_pos;
+  if (pos.isNull())
+    global_pos = QCursor::pos();
+  else
+    mapToGlobal(pos);
   auto modifiers = QApplication::keyboardModifiers();
 
   auto release_event = new QMouseEvent(
-      QEvent::MouseButtonRelease, pos, global_pos,
+      type, pos, global_pos,
       Qt::LeftButton, Qt::LeftButton, modifiers);
-  if (!target)
-    target = this;
-  QApplication::postEvent(target, release_event);
+  return release_event;
 }
 
 void DraggableTabBar::startTabMove() {
   auto global_pos = QCursor::pos();
   auto pos = mapFromGlobal(global_pos);
-  auto modifiers = QApplication::keyboardModifiers();
 
   auto idx = tabAt(pos);
-  auto parent = parentWidget_();
+  auto parent = parentTabWidget();
   parent->insertTab(
       idx,
       drag_tab_info_.widget(),
@@ -213,16 +195,25 @@ void DraggableTabBar::startTabMove() {
       drag_tab_info_.text());
   parent->setTabToolTip(idx, drag_tab_info_.toolTip());
   parent->setTabWhatsThis(idx, drag_tab_info_.whatsThis());
-  parent->setCurrentIndex(idx);
+  parent->setCurrentWidget(drag_tab_info_.widget());
+  dragging_widget_ = nullptr;
+  drag_tab_info_ = TabInfo();
 
-  auto press_event = new QMouseEvent(
-      QEvent::MouseButtonPress, pos, global_pos,
-      Qt::LeftButton, Qt::LeftButton, modifiers);
+  auto press_event = createMouseEvent(
+      QEvent::MouseButtonPress, tabRect(idx).center());
   QApplication::postEvent(this, press_event);
+  destroyUnnecessaryWindow();
 }
 
-DraggableTabWidget* DraggableTabBar::parentWidget_() const {
+DraggableTabWidget* DraggableTabBar::parentTabWidget() const {
   return qobject_cast<DraggableTabWidget*>(parent());
+}
+
+void DraggableTabBar::destroyUnnecessaryWindow() {
+  for (auto& bar_inst : tab_bar_instances_)
+    if (bar_inst->count() == 0
+        && !bar_inst->isVisible())
+      bar_inst->deleteLater();
 }
 
 }  // namespace
