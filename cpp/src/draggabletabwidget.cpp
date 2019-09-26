@@ -40,6 +40,7 @@ class DraggableTabBar : public QTabBar {
   void startTabMove();
   DraggableTabWidget* parentTabWidget() const;
   void destroyUnnecessaryWindow();
+  void insertCurrentTabInfo(int idx);
 
   QPoint click_point_ = QPoint();
   bool can_start_drag_ = false;
@@ -87,15 +88,22 @@ void DraggableTabBar::mousePressEvent(QMouseEvent* event) {
 void DraggableTabBar::mouseReleaseEvent(QMouseEvent* event) {
   if (event->button() == Qt::LeftButton) {
     if (initializing_drag_) {
-      dragging_widget_ = drag_tab_info_.widget();
-      dragging_widget_->setParent(nullptr);
-      dragging_widget_->setWindowFlags(Qt::FramelessWindowHint);
+      if (parentTabWidget()->indexOf(drag_tab_info_.widget()) < 0) {
+        dragging_widget_ = drag_tab_info_.widget();
+        dragging_widget_->setParent(nullptr);
+        dragging_widget_->setWindowFlags(Qt::FramelessWindowHint);
+      } else {
+        dragging_widget_ = window();
+      }
       initializing_drag_ = false;
     } else {
       if (dragging_widget_) {
         dragging_widget_->setWindowFlags(org_window_flags_);
         auto win_rect = dragging_widget_->geometry();
         win_rect.moveTo(event->globalPos());
+        auto idx = parentTabWidget()->indexOf(drag_tab_info_.widget());
+        if (idx >= 0)
+          parentTabWidget()->removeTab(idx);
         emit createWindowRequested(win_rect, drag_tab_info_);
         destroyUnnecessaryWindow();
       }
@@ -148,19 +156,19 @@ void DraggableTabBar::mouseMoveEvent(QMouseEvent* event) {
   }
 
   if (dragging_widget_) {
-    dragging_widget_->move(event->globalPos() + QPoint(1, 1));
+    dragging_widget_->move(event->globalPos() + QPoint(3, 3));
     dragging_widget_->show();
   }
 }
 
 void DraggableTabBar::startDrag() {
-  auto parent = parentTabWidget();
-  auto idx = parent->indexOf(drag_tab_info_.widget());
-  parent->removeTab(idx);
-  drag_tab_info_.widget()->setParent(nullptr);
+  if (count() > 1) {
+    auto parent = parentTabWidget();
+    auto idx = parent->indexOf(drag_tab_info_.widget());
+    parent->removeTab(idx);
+    drag_tab_info_.widget()->setParent(nullptr);
+  }
   dragging_widget_ = nullptr;
-  if (count() == 0)
-    window()->hide();
   initializing_drag_ = true;
   auto release_event = createMouseEvent(
       QEvent::MouseButtonRelease, mapFromGlobal(QCursor::pos()));
@@ -173,29 +181,29 @@ QMouseEvent* DraggableTabBar::createMouseEvent(
   if (pos.isNull())
     global_pos = QCursor::pos();
   else
-    mapToGlobal(pos);
+    global_pos = mapToGlobal(pos);
   auto modifiers = QApplication::keyboardModifiers();
 
-  auto release_event = new QMouseEvent(
+  auto event = new QMouseEvent(
       type, pos, global_pos,
       Qt::LeftButton, Qt::LeftButton, modifiers);
-  return release_event;
+  return event;
 }
 
 void DraggableTabBar::startTabMove() {
   auto global_pos = QCursor::pos();
   auto pos = mapFromGlobal(global_pos);
 
+  if (drag_tab_info_.widget()->parent()) {
+    auto parent = qobject_cast<DraggableTabWidget*>(
+        drag_tab_info_.widget()->parentWidget()->parentWidget());
+    auto idx = parent->indexOf(drag_tab_info_.widget());
+    parent->removeTab(idx);
+    parent->window()->hide();
+  }
+    
   auto idx = tabAt(pos);
-  auto parent = parentTabWidget();
-  parent->insertTab(
-      idx,
-      drag_tab_info_.widget(),
-      drag_tab_info_.icon(),
-      drag_tab_info_.text());
-  parent->setTabToolTip(idx, drag_tab_info_.toolTip());
-  parent->setTabWhatsThis(idx, drag_tab_info_.whatsThis());
-  parent->setCurrentWidget(drag_tab_info_.widget());
+  insertCurrentTabInfo(idx);
   dragging_widget_ = nullptr;
   drag_tab_info_ = TabInfo();
 
@@ -203,6 +211,7 @@ void DraggableTabBar::startTabMove() {
       QEvent::MouseButtonPress, tabRect(idx).center());
   QApplication::postEvent(this, press_event);
   destroyUnnecessaryWindow();
+  window()->raise();
 }
 
 DraggableTabWidget* DraggableTabBar::parentTabWidget() const {
@@ -213,8 +222,20 @@ void DraggableTabBar::destroyUnnecessaryWindow() {
   for (auto& bar_inst : tab_bar_instances_)
     if (bar_inst->count() == 0
         && !bar_inst->isVisible())
-      bar_inst->deleteLater();
+      bar_inst->parent()->deleteLater();
 }
+
+void DraggableTabBar::insertCurrentTabInfo(int idx) {
+  auto parent = parentTabWidget();
+  parent->insertTab(
+      idx,
+      drag_tab_info_.widget(),
+      drag_tab_info_.icon(),
+      drag_tab_info_.text());
+  parent->setTabToolTip(idx, drag_tab_info_.toolTip());
+  parent->setTabWhatsThis(idx, drag_tab_info_.whatsThis());
+  parent->setCurrentWidget(drag_tab_info_.widget());
+}  
 
 }  // namespace
 
