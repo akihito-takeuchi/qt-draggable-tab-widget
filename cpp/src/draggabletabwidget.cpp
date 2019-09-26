@@ -129,8 +129,7 @@ void DraggableTabBar::mouseMoveEvent(QMouseEvent* event) {
     for (auto& bar_inst : tab_bar_instances_) {
       auto bar_region  = bar_inst->visibleRegion();
       bar_region.translate(bar_inst->mapToGlobal(QPoint(0, 0)));
-      if (bar_region.contains(event->globalPos())
-          && qApp->widgetAt(event->globalPos()) == bar_inst) {
+      if (bar_region.contains(event->globalPos())) {
         if (bar_inst == this) {
           startTabMove();
           event->accept();
