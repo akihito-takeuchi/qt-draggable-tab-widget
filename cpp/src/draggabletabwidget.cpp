@@ -95,6 +95,7 @@ void DraggableTabBar::mouseReleaseEvent(QMouseEvent* event) {
         dragging_widget_ = window();
       }
       initializing_drag_ = false;
+      dragging_widget_->window()->raise();
     } else {
       if (dragging_widget_) {
         dragging_widget_->setWindowFlags(org_window_flags_);
