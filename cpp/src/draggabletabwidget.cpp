@@ -193,6 +193,7 @@ void DraggableTabBar::startTabMove() {
   auto global_pos = QCursor::pos();
   auto pos = mapFromGlobal(global_pos);
 
+  dragging_widget_->setWindowFlags(org_window_flags_);
   if (drag_tab_info_.widget()->parent()) {
     auto parent = qobject_cast<DraggableTabWidget*>(
         drag_tab_info_.widget()->parentWidget()->parentWidget());
