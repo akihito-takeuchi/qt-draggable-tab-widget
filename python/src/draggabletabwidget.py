@@ -7,15 +7,16 @@ Signal = QtCore.pyqtSignal
 Slot = QtCore.pyqtSlot
 
 class TabInfo:
-    def __init__(self):
-        self.widget = None
-        self.text = None
-        self.icon = None
-        self.tool_tip = None
-        self.whats_this = None
+    def __init__(self, widget = None, text = None, icon = None,
+                 tool_tip = None, whats_this = None):
+        self.widget = widget
+        self.text = text
+        self.icon = icon
+        self.tool_tip = tool_tip
+        self.whats_this = whats_this
 
 class DraggableTabWidget(QtWidgets.QTabWidget):
-    tab_widgets = []
+    tab_widget_instances_ = []
 
     def __init__(self, parent = None):
         super().__init__(parent)
@@ -23,7 +24,13 @@ class DraggableTabWidget(QtWidgets.QTabWidget):
         self.setTabBar(tab_bar)
         tab_bar.createWindowRequested.connect(self.createNewWindow)
         self.setMovable(True)
-        DraggableTabWidget.tab_widgets.append(self)
+        DraggableTabWidget.tab_widget_instances_.append(self)
+
+    def event(self, event):
+        if event.type() == QtCore.QEvent.DeferredDelete:
+            print("Deleting DraggableTabWidget")
+            DraggableTabWidget.tab_widget_instances_.remove(self)
+        return super().event(event)
 
     @Slot(QtCore.QRect, TabInfo)
     def createNewWindow(self, win_rect, tab_info):
@@ -41,155 +48,175 @@ class DraggableTabWidget(QtWidgets.QTabWidget):
 class DraggableTabBar(QtWidgets.QTabBar):
     createWindowRequested = Signal(QtCore.QRect, TabInfo)
 
-    _drag_tab_info = TabInfo()
+    initializing_drag_ = False
+    drag_tab_info_ = TabInfo()
+    dragging_widget_ = None
+    tab_bar_instances_ = []
+    org_window_flags_ = None
 
     def __init__(self, parent = None):
         super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.current_widget = None
+        DraggableTabBar.tab_bar_instances_.append(self)
         self.click_point = QtCore.QPoint()
-        QtWidgets.qApp.installEventFilter(self)
+        self.can_start_drag = False
+
+    def event(self, event):
+        if event.type() == QtCore.QEvent.DeferredDelete:
+            print("Deleting DraggableTabBar")
+            DraggableTabBar.tab_bar_instances_.remove(self)
+        return super().event(event)
 
     def mousePressEvent(self, event):
+        cls = DraggableTabBar
         if event.button() == QtCore.Qt.LeftButton:
             current_index = self.tabAt(event.pos())
-            self.parentWidget().setCurrentIndex(current_index)
-            self.current_widget = self.parentWidget().currentWidget()
-            tab_info = TabInfo()
-            tab_info.widget = None
-            tab_info.text = self.tabText(self.currentIndex())
-            tab_info.icon = self.tabIcon(self.currentIndex())
-            tab_info.tool_tip = self.tabToolTip(self.currentIndex())
-            tab_info.whats_this = self.tabWhatsThis(self.currentIndex())
-            DraggableTabBar._drag_tab_info = tab_info
-            self.click_point = event.globalPos() - self.window().pos()
+            parent = self.parent()
+            parent.setCurrentIndex(current_index)
+            current_widget = parent.currentWidget()
+            cls.drag_tab_info_ = TabInfo(
+                current_widget, self.tabText(current_index),
+                self.tabIcon(current_index), self.tabToolTip(current_index),
+                self.tabWhatsThis(current_index))
+            cls.dragging_widget_ = None
+            cls.org_window_flags_ = current_widget.windowFlags()
+            self.click_point = event.pos()
+            self.can_start_drag = False
+            self.grabMouse()
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
+        cls = DraggableTabBar
+        if event.button() == QtCore.Qt.LeftButton:
+            if cls.initializing_drag_:
+                if self.parent().indexOf(cls.drag_tab_info_.widget) < 0:
+                    cls.dragging_widget_ = cls.drag_tab_info_.widget
+                    cls.dragging_widget_.setParent(None)
+                    cls.dragging_widget_.setWindowFlags(
+                        QtCore.Qt.FramelessWindowHint)
+                else:
+                    cls.dragging_widget_ = self.window()
+                cls.initializing_drag_ = False
+                cls.dragging_widget_.window().raise_()
+            else:
+                if cls.dragging_widget_:
+                    cls.dragging_widget_.setWindowFlags(cls.org_window_flags_)
+                    win_rect = cls.dragging_widget_.geometry()
+                    win_rect.moveTo(event.globalPos())
+                    idx = self.parent().indexOf(cls.drag_tab_info_.widget)
+                    if idx >= 0:
+                        self.parent().removeTab(idx)
+                    self.createWindowRequested.emit(win_rect, cls.drag_tab_info_)
+                    self.destroyUnnecessaryWindow()
+                cls.dragging_widget_ = None
+                cls.drag_tab_info_ = TabInfo()
+                self.releaseMouse()
         self.click_point = QtCore.QPoint()
-        DraggableTabBar._drag_tab_info.widget = None
+        self.can_start_drag = False
         super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self.click_point.isNull():
+        cls = DraggableTabBar
+        if cls.drag_tab_info_.widget is None:
             return
 
-        if self.geometry().contains(event.pos()):
+        if not self.can_start_drag:
+            moved_length = (event.pos() - self.click_point).manhattanLength()
+            self.can_start_drag = moved_length > QtWidgets.qApp.startDragDistance()
+
+        if cls.dragging_widget_:
+            for bar_inst in cls.tab_bar_instances_:
+                bar_region = bar_inst.visibleRegion()
+                bar_region.translate(bar_inst.mapToGlobal(QtCore.QPoint(0, 0)))
+                if bar_region.contains(event.globalPos()):
+                    if (bar_inst == self):
+                        self.startTabMove()
+                        event.accept()
+                        return
+                    else:
+                        self.releaseMouse()
+                        bar_inst.grabMouse()
+                        event.accept()
+                        return
+        widget_rect = self.geometry()
+        widget_rect.moveTo(0, 0)
+        if widget_rect.contains(event.pos()):
             super().mouseMoveEvent(event)
-        elif not DraggableTabBar._drag_tab_info.widget:
+        elif cls.dragging_widget_ is None and self.can_start_drag:
             # start dragging
             self.startDrag()
             event.accept()
-        else:
-            super().mouseMoveEvent(event)
+            return
+
+        if cls.dragging_widget_:
+            cls.dragging_widget_.move(event.globalPos() + QtCore.QPoint(1, 1))
+            cls.dragging_widget_.show()
 
     def startDrag(self):
-        DraggableTabBar._drag_tab_info.widget = self.current_widget
-        idx = self.parentWidget().indexOf(self.current_widget)
-        self.parentWidget().removeTab(idx)
-        if self.count() == 0:
-            self.window().hide()
-        drag = QtGui.QDrag(self)
-        data = QtCore.QMimeData()
-        drag.setMimeData(data)
-        drag.setPixmap(self.current_widget.grab())
-        drop_action = drag.exec_(QtCore.Qt.MoveAction)
-        if drop_action == QtCore.Qt.IgnoreAction:
-            if drag.target() is self:
-                # Back to normal move event
-                self.sendButtonRelease()
-                self.startTabMove()
-                DraggableTabBar._drag_tab_info.widget = None
-            else:
-                # Drop out. Create new window and complete mouse move
-                global_pos = QtGui.QCursor.pos()
-                pos = self.mapFromGlobal(global_pos)
-                win_rect = self.parent().geometry()
-                win_rect.moveTo(global_pos)
-                self.createWindowRequested.emit(
-                    win_rect, DraggableTabBar._drag_tab_info)
-                DraggableTabBar._drag_tab_info.widget = None
-                release_event = QtGui.QMouseEvent(
-                    QtCore.QEvent.MouseButtonRelease, pos, global_pos,
-                    QtCore.Qt.LeftButton, QtCore.Qt.LeftButton,
-                    QtWidgets.QApplication.keyboardModifiers())
-                QtWidgets.QApplication.postEvent(self, release_event)
-        if self.count() == 0:
-            self.window().deleteLater()
+        cls = DraggableTabBar
+        if self.count() > 1:
+            parent = self.parent()
+            idx = parent.indexOf(cls.drag_tab_info_.widget)
+            parent.removeTab(idx)
+            cls.drag_tab_info_.widget.setParent(None)
+        cls.dragging_widget_ = None
+        cls.initializing_drag_ = True
+        release_event = self.createMouseEvent(
+            QtCore.QEvent.MouseButtonRelease,
+            self.mapFromGlobal(QtGui.QCursor.pos()))
+        QtWidgets.QApplication.postEvent(self, release_event)
 
-    def eventFilter(self, obj, event):
-        if obj is self.window().windowHandle():
-            return self.dispatchEvent(event)
-        return False
-
-    def dispatchEvent(self, event):
-        event_func_map = {
-            QtCore.QEvent.MouseMove          : self.mouseMoveEvent,
-            QtCore.QEvent.MouseButtonRelease : self.mouseReleaseEvent,
-        }
-        if event.type() not in event_func_map:
-            return False
-
-        if event.type() == QtCore.QEvent.MouseMove \
-           and DraggableTabBar._drag_tab_info.widget:
-            return False
-
-        if event.type() == QtCore.QEvent.MouseButtonRelease \
-           and self.click_point.isNull():
-            return False
-        
-        pos = self.mapFromGlobal(event.globalPos())
-        new_event = QtGui.QMouseEvent(
-            event.type(), pos, event.globalPos(),
-            event.button(), event.buttons(), event.modifiers())
-        event_func_map[event.type()](new_event)
-        return True
-
-    def dragEnterEvent(self, event):
-        # When mouse cursor is back to source widget, cancel drag
-        if self.geometry().contains(event.pos()) \
-           and event.source() is self:
-            QtGui.QDrag.cancel()
-            event.accept()
-            return
-        event.acceptProposedAction()
-        self.sendButtonRelease(event.source())
-
-    def dropEvent(self, event):
-        event.acceptProposedAction()
-        self.startTabMove()
-
-    def sendButtonRelease(self, obj = None):
-        global_pos = QtGui.QCursor.pos()
-        pos = self.mapFromGlobal(global_pos)
+    def createMouseEvent(self, event_type, pos = QtCore.QPoint()):
+        if pos.isNull():
+            global_pos = QtGui.QCursor.pos()
+        else:
+            global_pos = self.mapToGlobal(pos)
         modifiers = QtWidgets.QApplication.keyboardModifiers()
 
-        release_event = QtGui.QMouseEvent(
-            QtCore.QEvent.MouseButtonRelease, pos, global_pos,
+        event = QtGui.QMouseEvent(
+            event_type, pos, global_pos,
             QtCore.Qt.LeftButton, QtCore.Qt.LeftButton, modifiers)
-        if obj is None:
-            obj = self
-        QtWidgets.QApplication.postEvent(obj, release_event)
+        return event
 
     def startTabMove(self):
+        cls = DraggableTabBar
         global_pos = QtGui.QCursor.pos()
         pos = self.mapFromGlobal(global_pos)
-        modifiers = QtWidgets.QApplication.keyboardModifiers()
 
+        cls.dragging_widget_.setWindowFlags(cls.org_window_flags_)
+        if cls.drag_tab_info_.widget.parent() is not None:
+            parent = cls.drag_tab_info_.widget.parent().parent()
+            idx = parent.indexOf(cls.drag_tab_info_.widget)
+            parent.removeTab(idx)
+            parent.window().hide()
+        
         idx = self.tabAt(pos)
-        self.parentWidget().insertTab(
-            idx,
-            DraggableTabBar._drag_tab_info.widget,
-            DraggableTabBar._drag_tab_info.icon,
-            DraggableTabBar._drag_tab_info.text
-        )
-        self.parentWidget().setTabToolTip(
-            idx, DraggableTabBar._drag_tab_info.tool_tip)
-        self.parentWidget().setTabWhatsThis(
-            idx, DraggableTabBar._drag_tab_info.whats_this)
-        self.parentWidget().setCurrentIndex(idx)
+        self.insertCurrentTabInfo(idx)
+        cls.dragging_widget_ = None
+        cls.drag_tab_info_ = TabInfo()
 
-        press_event = QtGui.QMouseEvent(
-            QtCore.QEvent.MouseButtonPress, pos, global_pos,
-            QtCore.Qt.LeftButton, QtCore.Qt.LeftButton, modifiers)
+        press_event = self.createMouseEvent(
+            QtCore.QEvent.MouseButtonPress, self.tabRect(idx).center())
         QtWidgets.QApplication.postEvent(self, press_event)
+        self.destroyUnnecessaryWindow()
+        self.window().raise_()
+
+    def destroyUnnecessaryWindow(self):
+        cls = DraggableTabBar
+        for bar_inst in cls.tab_bar_instances_:
+            if bar_inst.count() == 0 \
+               and not bar_inst.isVisible():
+                bar_inst.deleteLater()
+                bar_inst.parent().deleteLater()
+
+    def insertCurrentTabInfo(self, idx):
+        cls = DraggableTabBar
+        parent = self.parent()
+        parent.insertTab(
+            idx,
+            cls.drag_tab_info_.widget,
+            cls.drag_tab_info_.icon,
+            cls.drag_tab_info_.text
+        )
+        parent.setTabToolTip(idx, cls.drag_tab_info_.tool_tip)
+        parent.setTabWhatsThis(idx, cls.drag_tab_info_.whats_this)
+        parent.setCurrentWidget(cls.drag_tab_info_.widget)
