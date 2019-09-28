@@ -1,6 +1,14 @@
 # Qt Draggable tab widget
 
-This widget supports draggable tab. User can drag the tab to detach it from the tab widget.
+This widget supports draggable tab. User can drag the tab to detach it from the tab widget. Python and C++ is supported. The codes were developed in following environment.
+
+* C++
+  * Linux (CentOS7) Qt 5.10.1
+  * macOS Qt 5.7.1
+* Python
+  * Linux (CentOS7) Qt 5.10.1 + PyQt5
+
+This documentation uses Python code. C++ is almost the same.
 
 ## Usage
 
