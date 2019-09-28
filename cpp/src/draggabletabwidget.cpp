@@ -61,7 +61,6 @@ Qt::WindowFlags DraggableTabBar::org_window_flags_;
 DraggableTabBar::DraggableTabBar(QWidget* parent)
     : QTabBar(parent) {
   tab_bar_instances_ << this;
-  setAcceptDrops(true);
 }
 
 DraggableTabBar::~DraggableTabBar() {
