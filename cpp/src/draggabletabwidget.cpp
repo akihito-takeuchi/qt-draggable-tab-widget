@@ -49,14 +49,12 @@ class DraggableTabBar : public QTabBar {
   static TabInfo drag_tab_info_;
   static QWidget* dragging_widget_;
   static QList<DraggableTabBar*> tab_bar_instances_;
-  static Qt::WindowFlags org_window_flags_;
 };
 
 bool DraggableTabBar::initializing_drag_ = false;
 TabInfo DraggableTabBar::drag_tab_info_;
 QWidget* DraggableTabBar::dragging_widget_ = nullptr;
 QList<DraggableTabBar*> DraggableTabBar::tab_bar_instances_;
-Qt::WindowFlags DraggableTabBar::org_window_flags_;
 
 DraggableTabBar::DraggableTabBar(QWidget* parent)
     : QTabBar(parent) {
@@ -77,7 +75,6 @@ void DraggableTabBar::mousePressEvent(QMouseEvent* event) {
         parent->currentWidget(), tabText(current_index), tabIcon(current_index),
         tabToolTip(current_index), tabWhatsThis(current_index));
     dragging_widget_ = nullptr;
-    org_window_flags_ = drag_tab_info_.widget()->windowFlags();
     click_point_ = event->pos();
     can_start_drag_ = false;
     grabMouse();
@@ -98,7 +95,6 @@ void DraggableTabBar::mouseReleaseEvent(QMouseEvent* event) {
       initializing_drag_ = false;
     } else {
       if (dragging_widget_) {
-        dragging_widget_->setWindowFlags(org_window_flags_);
         auto win_rect = dragging_widget_->geometry();
         win_rect.moveTo(event->globalPos());
         auto idx = parentTabWidget()->indexOf(drag_tab_info_.widget());
@@ -193,7 +189,6 @@ void DraggableTabBar::startTabMove() {
   auto global_pos = QCursor::pos();
   auto pos = mapFromGlobal(global_pos);
 
-  dragging_widget_->setWindowFlags(org_window_flags_);
   if (drag_tab_info_.widget()->parent()) {
     auto parent = qobject_cast<DraggableTabWidget*>(
         drag_tab_info_.widget()->parentWidget()->parentWidget());

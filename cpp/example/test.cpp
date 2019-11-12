@@ -4,13 +4,20 @@
 #include "draggabletabwidget.h"
 
 #include <QApplication>
-#include <QLabel>
+#include <QTableWidget>
+
+QTableWidget* CreateTable() {
+  auto tbl = new QTableWidget;
+  tbl->setRowCount(5);
+  tbl->setColumnCount(5);
+  return tbl;
+}
 
 int main(int argc, char* argv[]) {
   QApplication a(argc, argv);
   DraggableTabWidget w;
   for (int i = 1; i <= 5; ++ i)
-    w.addTab(new QLabel(QString("Widget %1").arg(i)),
+    w.addTab(CreateTable(),
              QString("Tab%1").arg(i));
   w.resize(600, 400);
   w.show();
