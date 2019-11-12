@@ -59,7 +59,6 @@ QList<DraggableTabBar*> DraggableTabBar::tab_bar_instances_;
 DraggableTabBar::DraggableTabBar(QWidget* parent)
     : QTabBar(parent) {
   tab_bar_instances_ << this;
-  setAcceptDrops(true);
 }
 
 DraggableTabBar::~DraggableTabBar() {
@@ -93,6 +92,7 @@ void DraggableTabBar::mouseReleaseEvent(QMouseEvent* event) {
         dragging_widget_ = window();
       }
       initializing_drag_ = false;
+      dragging_widget_->window()->raise();
     } else {
       if (dragging_widget_) {
         auto win_rect = dragging_widget_->geometry();
