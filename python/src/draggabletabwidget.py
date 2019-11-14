@@ -52,7 +52,6 @@ class DraggableTabBar(QtWidgets.QTabBar):
     drag_tab_info_ = TabInfo()
     dragging_widget_ = None
     tab_bar_instances_ = []
-    org_window_flags_ = None
 
     def __init__(self, parent = None):
         super().__init__(parent)
@@ -78,7 +77,6 @@ class DraggableTabBar(QtWidgets.QTabBar):
                 self.tabIcon(current_index), self.tabToolTip(current_index),
                 self.tabWhatsThis(current_index))
             cls.dragging_widget_ = None
-            cls.org_window_flags_ = current_widget.windowFlags()
             self.click_point = event.pos()
             self.can_start_drag = False
             self.grabMouse()
@@ -99,7 +97,6 @@ class DraggableTabBar(QtWidgets.QTabBar):
                 cls.dragging_widget_.window().raise_()
             else:
                 if cls.dragging_widget_:
-                    cls.dragging_widget_.setWindowFlags(cls.org_window_flags_)
                     win_rect = cls.dragging_widget_.geometry()
                     win_rect.moveTo(event.globalPos())
                     idx = self.parent().indexOf(cls.drag_tab_info_.widget)
@@ -182,7 +179,6 @@ class DraggableTabBar(QtWidgets.QTabBar):
         global_pos = QtGui.QCursor.pos()
         pos = self.mapFromGlobal(global_pos)
 
-        cls.dragging_widget_.setWindowFlags(cls.org_window_flags_)
         if cls.drag_tab_info_.widget.parent() is not None:
             parent = cls.drag_tab_info_.widget.parent().parent()
             idx = parent.indexOf(cls.drag_tab_info_.widget)
