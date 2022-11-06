@@ -28,7 +28,6 @@ class DraggableTabWidget(QtWidgets.QTabWidget):
 
     def event(self, event):
         if event.type() == QtCore.QEvent.DeferredDelete:
-            print("Deleting DraggableTabWidget")
             DraggableTabWidget.tab_widget_instances_.remove(self)
         return super().event(event)
 
@@ -61,7 +60,6 @@ class DraggableTabBar(QtWidgets.QTabBar):
 
     def event(self, event):
         if event.type() == QtCore.QEvent.DeferredDelete:
-            print("Deleting DraggableTabBar")
             DraggableTabBar.tab_bar_instances_.remove(self)
         return super().event(event)
 
@@ -86,7 +84,7 @@ class DraggableTabBar(QtWidgets.QTabBar):
         cls = DraggableTabBar
         if event.button() == QtCore.Qt.LeftButton:
             if cls.initializing_drag_:
-                if self.parent().indexOf(cls.drag_tab_info_.widget) < 0:
+                if self.parent().indexOf(cls.drag_tab_info_.widget) <= 0:
                     cls.dragging_widget_ = cls.drag_tab_info_.widget
                     cls.dragging_widget_.setParent(None)
                     cls.dragging_widget_.setWindowFlags(
@@ -200,7 +198,7 @@ class DraggableTabBar(QtWidgets.QTabBar):
         cls = DraggableTabBar
         for bar_inst in cls.tab_bar_instances_:
             if bar_inst.count() == 0 \
-               and not bar_inst.isVisible():
+               and (not bar_inst.isVisible() or bar_inst.parent().parent() is None):
                 bar_inst.deleteLater()
                 bar_inst.parent().deleteLater()
 
