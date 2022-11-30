@@ -50,18 +50,11 @@ class DraggableTabBar(QtWidgets.QTabBar):
     initializing_drag_ = False
     drag_tab_info_ = TabInfo()
     dragging_widget_ = None
-    tab_bar_instances_ = []
 
     def __init__(self, parent = None):
         super().__init__(parent)
-        DraggableTabBar.tab_bar_instances_.append(self)
         self.click_point = QtCore.QPoint()
         self.can_start_drag = False
-
-    def event(self, event):
-        if event.type() == QtCore.QEvent.DeferredDelete:
-            DraggableTabBar.tab_bar_instances_.remove(self)
-        return super().event(event)
 
     def mousePressEvent(self, event):
         cls = DraggableTabBar
@@ -119,7 +112,7 @@ class DraggableTabBar(QtWidgets.QTabBar):
             self.can_start_drag = moved_length > QtWidgets.qApp.startDragDistance()
 
         if cls.dragging_widget_:
-            for bar_inst in cls.tab_bar_instances_:
+            for bar_inst in cls._tabBarInstances():
                 bar_region = bar_inst.visibleRegion()
                 bar_region.translate(bar_inst.mapToGlobal(QtCore.QPoint(0, 0)))
                 if bar_region.contains(event.globalPos()):
@@ -196,7 +189,7 @@ class DraggableTabBar(QtWidgets.QTabBar):
 
     def destroyUnnecessaryWindow(self):
         cls = DraggableTabBar
-        for bar_inst in cls.tab_bar_instances_:
+        for bar_inst in cls._tabBarInstances():
             if bar_inst.count() == 0 \
                and (not bar_inst.isVisible() or bar_inst.parent().parent() is None):
                 bar_inst.deleteLater()
@@ -214,3 +207,7 @@ class DraggableTabBar(QtWidgets.QTabBar):
         parent.setTabToolTip(idx, cls.drag_tab_info_.tool_tip)
         parent.setTabWhatsThis(idx, cls.drag_tab_info_.whats_this)
         parent.setCurrentWidget(cls.drag_tab_info_.widget)
+
+    @classmethod
+    def _tabBarInstances(cls):
+        return [w for w in QtWidgets.qApp.allWidgets() if w.__class__ == cls]
